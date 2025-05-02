@@ -3,6 +3,15 @@
 ## 使用說明
 請先至網站購買電子書，並詳見 main.rb 的使用方法。
 
+新版v1.7需要安裝[chromedriver](https://developer.chrome.com/docs/chromedriver/downloads)
+並確保它與你的 Chrome 瀏覽器版本相符，放到 PATH 裡，才能使用selenium自動登入(現在是滑軌captcha)
+安裝確認
+```
+chromedriver -v
+```
+output:
+`ChromeDriver 135.0.7049.114 ...`
+
 > 下載時請不要用瀏覽器操作博客來網站功能，該站電子書區有防多重登入。
 
 ## [博客來電子書服務條款](https://www.books.com.tw/web/sys_qalist/qa_1_80#M201105_0_getQaQuestion_P00ce00020006_42)
