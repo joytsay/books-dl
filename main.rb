@@ -7,6 +7,6 @@ require_relative './lib/books_dl'
 #   https://viewer-ebook.books.com.tw/viewer/epub/web/?book_uni_id=E050096232_reflowable_normal&ran=97991701
 # book_uni_id= 之後的字串就是這本書的 book_id 了
 #
-book_id = 'E050096232_reflowable_normal&ran=97991701'
+book_id = 'E050260238_reflowable_trial&ran=34078456'
 downloader = BooksDL::Downloader.new(book_id)
 downloader.perform

@@ -213,44 +213,19 @@ module BooksDL
     require 'selenium-webdriver'
     def login_with_slider_captcha
       options = Selenium::WebDriver::Chrome::Options.new
-      options.add_argument('--headless') # 可關掉以除錯模式觀察
+      # Comment out or remove headless mode for manual interaction
+      # options.add_argument('--headless')
       options.add_argument('--disable-gpu')
       options.add_argument('--window-size=1280,800')
 
       driver = Selenium::WebDriver.for :chrome, options: options
-      wait = Selenium::WebDriver::Wait.new(timeout: 15)
 
       begin
         driver.get(LOGIN_PAGE_URL)
-        username, password = get_account_from_stdin
-        driver.find_element(id: "login_id").send_keys(username)
-        driver.find_element(id: "login_pswd").send_keys(password)
-        driver.find_element(id: "show-captcha").click
+        puts "請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續..."
+        STDIN.gets # Wait for user to press Enter
 
-        wait.until { driver.find_element(id: "puzzle-piece").displayed? }
-
-        piece = driver.find_element(id: "puzzle-piece")
-        container = driver.find_element(id: "slider-container")
-        container_width = container.size.width
-        target_x = container_width - 70
-
-        action = driver.action
-        action.click_and_hold(piece)
-        steps = 30
-        (1..steps).each do |i|
-          offset = (target_x * i / steps) - (target_x * (i - 1) / steps)
-          action.move_by(offset, 0)
-          sleep(0.02)
-        end
-        action.release.perform
-
-        wait.until { driver.find_element(id: "books_login").enabled? }
-        driver.find_element(id: "books_login").click
-
-        sleep 3
-        puts "Selenium 登入完成，驗證 URL: #{driver.current_url}"
-
-        # 把 cookie 拿回 Ruby HTTP 模組
+        # After manual login, collect cookies
         driver.manage.all_cookies.each do |cookie|
           current_cookie[cookie[:name]] = cookie[:value]
         end
