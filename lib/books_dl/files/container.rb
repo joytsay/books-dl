@@ -1,14 +1,20 @@
+require "nokogiri"
+
 module BooksDL
   module Files
     class Container < ::BooksDL::BaseFile
-      def root_file_path
-        doc.css('rootfile').first.attr('full-path')
-      end
+      attr_reader :root_file_path
 
-      private
+      def initialize(path, content)
+        super(path, content)
 
-      def doc
-        Nokogiri::XML(content)
+        doc = Nokogiri::XML(content)
+        doc.remove_namespaces!
+
+        rootfile = doc.at_css("rootfile")
+        raise "Invalid container.xml. First 500 chars:\n#{content.to_s[0, 500]}" unless rootfile
+
+        @root_file_path = rootfile["full-path"]
       end
     end
   end

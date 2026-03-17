@@ -212,33 +212,46 @@ module BooksDL
 
     require 'selenium-webdriver'
     def login_with_slider_captcha
-      options = Selenium::WebDriver::Chrome::Options.new
-      # Comment out or remove headless mode for manual interaction
-      # options.add_argument('--headless')
-      options.add_argument('--disable-gpu')
-      options.add_argument('--window-size=1280,800')
+      browser_path = "/snap/chromium/current/usr/lib/chromium-browser/chrome"
+      driver_path  = "/snap/chromium/current/usr/lib/chromium-browser/chromedriver"
+      profile_dir  = Dir.mktmpdir("chromium-selenium-")
 
-      driver = Selenium::WebDriver.for :chrome, options: options
+      options = Selenium::WebDriver::Chrome::Options.new
+      options.binary = browser_path
+      options.add_argument("--user-data-dir=#{profile_dir}")
+      options.add_argument("--no-sandbox")
+      options.add_argument("--disable-setuid-sandbox")
+      options.add_argument("--disable-dev-shm-usage")
+      options.add_argument("--disable-gpu")
+      options.add_argument("--disable-software-rasterizer")
+      options.add_argument("--window-size=1280,800")
+      options.add_argument("--remote-debugging-pipe")
+
+      service = Selenium::WebDriver::Service.chrome(
+        path: driver_path,
+        args: ["--verbose", "--log-path=/tmp/chromedriver.log"]
+      )
+
+      driver = Selenium::WebDriver.for(:chrome, options: options, service: service)
 
       begin
-        driver.get(LOGIN_PAGE_URL)
+        driver.navigate.to(LOGIN_PAGE_URL)
         puts "請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續..."
-        STDIN.gets # Wait for user to press Enter
+        STDIN.gets
 
-        # After manual login, collect cookies
+        @current_cookie ||= {}
         driver.manage.all_cookies.each do |cookie|
-          current_cookie[cookie[:name]] = cookie[:value]
+          @current_cookie[cookie[:name]] = cookie[:value]
         end
 
-        cookie_json = JSON.pretty_generate(current_cookie)
-        File.write(COOKIE_FILE_NAME, cookie_json)
-
+        File.write(COOKIE_FILE_NAME, JSON.pretty_generate(@current_cookie))
         true
       rescue => e
-        puts "[Selenium] 登入失敗：#{e.message}"
+        puts "[Selenium] 登入失敗：#{e.class} - #{e.message}"
         false
       ensure
-        driver.quit
+        driver.quit if driver
+        FileUtils.remove_entry(profile_dir) if Dir.exist?(profile_dir)
       end
     end
   end
