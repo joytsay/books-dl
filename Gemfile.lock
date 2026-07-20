@@ -10,6 +10,7 @@ GEM
     domain_name (0.6.20240107)
     ffi (1.17.2-aarch64-linux-gnu)
     ffi (1.17.2-x64-mingw-ucrt)
+    ffi (1.17.2-x86_64-linux-gnu)
     ffi-compiler (1.3.2)
       ffi (>= 1.15.5)
       rake
@@ -29,6 +30,9 @@ GEM
       racc (~> 1.4)
     nokogiri (1.18.8-x64-mingw-ucrt)
       racc (~> 1.4)
+    nokogiri (1.18.8-x86_64-linux-gnu)
+      racc (~> 1.4)
+    ostruct (0.6.3)
     public_suffix (6.0.2)
     racc (1.8.1)
     rake (13.3.0)
@@ -58,12 +62,14 @@ GEM
 PLATFORMS
   aarch64-linux
   x64-mingw-ucrt
+  x86_64-linux
 
 DEPENDENCIES
   awesome_print
   byebug
   http
   nokogiri
+  ostruct
   rspec
   rubyzip (>= 1.0.0)
   selenium-webdriver

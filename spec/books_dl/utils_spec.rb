@@ -39,6 +39,48 @@ describe BooksDL::Utils do
       expect(return_value).to be_a Array
       expect(return_value).to eq decode2
     end
+
+    it 'ignores download query parameters when deriving the key' do
+      return_value = described_class.generate_key("#{url}?DownloadToken=temporary", download_token)
+
+      expect(return_value).to eq decode
+    end
+
+    it 'supports bookII streaming URLs' do
+      book_ii_url = 'https://streaming-ebook.books.com.tw/V1.0/Streaming/bookII/DD0CB3/952170/OEBPS/content.opf'
+
+      expect(described_class.generate_key(book_ii_url, download_token)).to eq decode
+    end
+  end
+
+  describe '.extract_file_path' do
+    it 'extracts and unescapes the encrypted path without its query string' do
+      value = described_class.extract_file_path(
+        'https://streaming-ebook.books.com.tw/V1.0/Streaming/bookII/E55837/9897747/OEBPS/a%20b.xhtml?DownloadToken=x'
+      )
+
+      expect(value).to eq '/E55837/9897747/OEBPS/a b.xhtml'
+    end
+
+    it 'rejects unrelated URLs' do
+      expect { described_class.extract_file_path('https://example.com/book.epub') }
+        .to raise_error(ArgumentError, /unexpected download url format/)
+    end
+  end
+
+  describe '.ya_token' do
+    it 'matches the viewer YA HMAC token algorithm' do
+      value = described_class.ya_token('download-token', 'OEBPS/story-1.xhtml')
+
+      expect(value).to eq(
+        '30a1caa41c387d897464940c68e26f51390c508dd3cd6994276d19cd41617c20download-token'
+      )
+    end
+
+    it 'normalizes a leading slash in the resource path' do
+      expect(described_class.ya_token('download-token', '/OEBPS/story-1.xhtml'))
+        .to eq(described_class.ya_token('download-token', 'OEBPS/story-1.xhtml'))
+    end
   end
 
   describe '.decode_xor' do

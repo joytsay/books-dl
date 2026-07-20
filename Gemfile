@@ -2,6 +2,7 @@ source 'https://rubygems.org'
 
 gem 'http'
 gem 'nokogiri'
+gem 'ostruct'
 gem 'rubyzip', '>= 1.0.0'
 
 # for development

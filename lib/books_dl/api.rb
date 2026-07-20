@@ -2,11 +2,12 @@ require 'selenium-webdriver'
 
 module BooksDL
   class API
-    attr_reader :current_cookie, :book_id, :encoded_token
+    attr_reader :current_cookie, :book_id, :device_id
 
     COOKIE_FILE_NAME = 'cookie.json'.freeze
-    IMAGE_EXTENSIONS = %w[.bmp .gif .ico .jpeg .jpg .tiff .tif .svg .png .webp].freeze
-    NO_AUTH_EXTENSIONS = %w[.css .ttc .otf .ttf .eot .woff .woff2].freeze
+    EBOOK_SESSION_COOKIE_NAMES = %w[CmsToken bid ssid].freeze
+    NO_AUTH_EXTENSIONS = %w[.ttc .otf .ttf .eot .woff .woff2].freeze
+    BINARY_EXTENSIONS = %w[.mp3 .m4a .wav .ogg].freeze
 
     # API ENDPOINTS
     #
@@ -19,30 +20,26 @@ module BooksDL
     DEVICE_REG_URL = 'https://appapi-ebook.books.com.tw/V1.7/CMSAPIApp/DeviceReg'.freeze
     OAUTH_URL = 'https://appapi-ebook.books.com.tw/V1.7/CMSAPIApp/LoginURL?type=&device_id=&redirect_uri=https%3A%2F%2Fviewer-ebook.books.com.tw%2Fviewer%2Flogin.html'.freeze
     OAUTH_ENDPOINT_URL = 'https://appapi-ebook.books.com.tw/V1.7/CMSAPIApp/MemberLogin?code='.freeze
-    BOOK_DL_URL = 'https://appapi-ebook.books.com.tw/V1.7/CMSAPIApp/BookDownLoadURL'.freeze
+    BOOK_DL_URL = 'https://appapi-ebook.books.com.tw/V1.7/CMSAPIApp/BookDownLoadURLII'.freeze
     # rubocop:enable Metrics/LineLength
 
     def initialize(book_id)
       @book_id = book_id
       load_existed_cookies
-      @encoded_token ||= CGI.escape(info.download_token.to_s)
     end
 
     def fetch(path)
-      url = "#{info.download_link}#{path}"
+      url = "#{info.download_link.to_s.sub(%r{/+\z}, '')}/#{path.to_s.sub(%r{\A/+}, '')}"
       ext = File.extname(path).downcase
 
       if NO_AUTH_EXTENSIONS.include?(ext) || info.encrypt_type == 'none'
         get(url).body.to_s
-      elsif IMAGE_EXTENSIONS.include?(ext)
-        checksum = Utils.img_checksum
-        resp = get("#{url}?checksum=#{checksum}&DownloadToken=#{encoded_token}")
-
-        resp.body.to_s
       else
-        key = Utils.generate_key(url, info.download_token)
-        resp = get("#{url}?DownloadToken=#{encoded_token}")
+        token = metadata_path?(path) ? info.download_token : Utils.ya_token(info.download_token, path)
+        resp = get(with_download_token(url, token))
+        return resp.body.to_s if BINARY_EXTENSIONS.include?(ext)
 
+        key = Utils.generate_key(url, info.download_token)
         Utils.decode_xor(key, resp.body.to_s)
       end
     end
@@ -51,45 +48,19 @@ module BooksDL
     def info
       @info ||= begin
         login
+        register_device
+        create_ebook_session unless ebook_session?
 
-        data = {
-          form: {
-            device_id: '2b2475e7-da58-4cfe-aedf-ab4e6463757b',
-            language: 'zh-TW',
-            os_type: 'WEB',
-            os_version: default_headers[:'user-agent'],
-            screen_resolution: '1680X1050',
-            screen_dpi: 96,
-            device_vendor: 'Google Inc.',
-            device_model: 'web'
-          }
-        }
-
-        headers = {
-          accept: 'application/json, text/javascript, */*; q=0.01',
-          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          Origin: 'https://viewer-ebook.books.com.tw',
-          Referer: 'https://viewer-ebook.books.com.tw/viewer/epub/web/?book_uni_id=E050017049_reflowable_normal',
-        }
-
-        # remove old cookies
-        current_cookie.reject! { |key| %w[CmsToken redirect_uri normal_redirect_uri DownloadToken].include?(key) }
-        puts '註冊 Fake device 中...'
-        post(DEVICE_REG_URL, data, headers)
-
-        puts '透過 OAuth 取得 CmsToken...'
-        resp = get(OAUTH_URL)
-        login_uri = JSON.parse(resp.body.to_s).fetch('login_uri')
-        code = get(login_uri).headers['Location'].split('&code=').last
-        get("#{OAUTH_ENDPOINT_URL}#{code}")
-
-        resp = get("#{BOOK_DL_URL}?book_uni_id=#{book_id}&t=#{Time.now.to_i}")
-        OpenStruct.new(JSON.parse(resp.body.to_s))
+        query = URI.encode_www_form(book_uni_id: book_id, t: (Time.now.to_f * 1000).to_i)
+        resp = get("#{BOOK_DL_URL}?#{query}")
+        data = JSON.parse(resp.body.to_s)
+        validate_download_info!(data)
+        OpenStruct.new(data)
       end
     end
 
     def login
-      return if logged?
+      return if ebook_session? || logged?
       # 試著先用 Selenium 自動登入
       if login_with_slider_captcha
         puts "🎉 使用 Selenium 自動登入成功"
@@ -126,15 +97,81 @@ module BooksDL
 
     private
 
+    def ebook_session?
+      EBOOK_SESSION_COOKIE_NAMES.all? do |name|
+        current_cookie[name].is_a?(String) && !current_cookie[name].empty?
+      end
+    end
+
+    def create_ebook_session
+      current_cookie.reject! { |key| %w[CmsToken redirect_uri normal_redirect_uri DownloadToken].include?(key) }
+
+      puts '透過 OAuth 取得 CmsToken...'
+      resp = get(OAUTH_URL)
+      login_uri = JSON.parse(resp.body.to_s).fetch('login_uri')
+      code = get(login_uri).headers['Location'].split('&code=').last
+      get("#{OAUTH_ENDPOINT_URL}#{code}")
+    end
+
+    def register_device
+      if ebook_session? && device_id.to_s.empty?
+        raise 'cookie.json 缺少 device_id；請從閱讀器網域的 Local Storage 複製 device_id'
+      end
+
+      @device_id ||= SecureRandom.uuid
+      data = {
+        device_id: device_id,
+        language: 'zh-TW',
+        os_type: 'WEB',
+        os_version: default_headers[:'user-agent'],
+        screen_resolution: '1680X1050',
+        screen_dpi: 96,
+        device_vendor: 'Google Inc.',
+        device_model: 'web'
+      }
+      headers = {
+        accept: 'application/json, text/javascript, */*; q=0.01',
+        Origin: 'https://viewer-ebook.books.com.tw',
+        Referer: 'https://viewer-ebook.books.com.tw/viewer/epub/web/'
+      }
+
+      puts '註冊 Fake device 中...'
+      query = URI.encode_www_form(data)
+      get("#{DEVICE_REG_URL}?#{query}", headers)
+    end
+
+    def validate_download_info!(data)
+      if data['error_code']
+        raise "取得下載資訊失敗：#{data['error_code']} - #{data['error_message']}"
+      end
+
+      link = data['download_link'].to_s
+      return if link.match?(%r{\Ahttps?://}i)
+
+      raise "取得下載資訊失敗：API 未回傳有效的 download_link（book_id=#{book_id}）"
+    end
+
+    def metadata_path?(path)
+      File.basename(path).casecmp('container.xml').zero? || File.extname(path).casecmp('.opf').zero?
+    end
+
+    def with_download_token(url, token)
+      separator = url.include?('?') ? '&' : '?'
+      "#{url}#{separator}DownloadToken=#{URI.encode_www_form_component(token)}"
+    end
+
     def load_existed_cookies
-      @current_cookie = JSON.parse(File.read(COOKIE_FILE_NAME))
+      data = JSON.parse(File.read(COOKIE_FILE_NAME))
+      @device_id = data.delete('device_id')
+      @configured_book_id = data.delete('book_id')
+      @current_cookie = data
     rescue StandardError
       @current_cookie = {}
     end
 
     def get_account_from_stdin
-        print('請輸入帳號：')
-        username = gets.chomp
+      print('請輸入帳號：')
+      username = gets.chomp
       password = STDIN.getpass('請輸入密碼:').chomp
       [username, password]
     end
@@ -165,7 +202,11 @@ module BooksDL
       cookie_hash = cookie_jar.map { |cookie| [cookie.name, cookie.value] }.to_h
       current_cookie.merge!(cookie_hash)
 
-      cookie_json = JSON.pretty_generate(current_cookie)
+      saved_data = current_cookie.merge(
+        'book_id' => (@configured_book_id || book_id),
+        'device_id' => device_id
+      ).compact
+      cookie_json = JSON.pretty_generate(saved_data)
       File.open(COOKIE_FILE_NAME, 'w') do |file|
         file.write(cookie_json)
       end
@@ -210,33 +251,32 @@ module BooksDL
       gets.chomp
     end
 
-    require 'selenium-webdriver'
     def login_with_slider_captcha
-      browser_path = "/snap/chromium/current/usr/lib/chromium-browser/chrome"
-      driver_path  = "/snap/chromium/current/usr/lib/chromium-browser/chromedriver"
-      profile_dir  = Dir.mktmpdir("chromium-selenium-")
-
-      options = Selenium::WebDriver::Chrome::Options.new
-      options.binary = browser_path
-      options.add_argument("--user-data-dir=#{profile_dir}")
-      options.add_argument("--no-sandbox")
-      options.add_argument("--disable-setuid-sandbox")
-      options.add_argument("--disable-dev-shm-usage")
-      options.add_argument("--disable-gpu")
-      options.add_argument("--disable-software-rasterizer")
-      options.add_argument("--window-size=1280,800")
-      options.add_argument("--remote-debugging-pipe")
-
-      service = Selenium::WebDriver::Service.chrome(
-        path: driver_path,
-        args: ["--verbose", "--log-path=/tmp/chromedriver.log"]
-      )
-
-      driver = Selenium::WebDriver.for(:chrome, options: options, service: service)
+      browser_path = ENV['CHROME_BINARY']
+      driver_path = ENV['CHROMEDRIVER_PATH']
+      profile_dir = Dir.mktmpdir('chromium-selenium-')
+      driver = nil
 
       begin
+        options = Selenium::WebDriver::Chrome::Options.new
+        options.binary = browser_path unless browser_path.to_s.empty?
+        options.add_argument("--user-data-dir=#{profile_dir}")
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-setuid-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-software-rasterizer')
+        options.add_argument('--window-size=1280,800')
+        options.add_argument('--remote-debugging-pipe')
+
+        log_path = File.join(Dir.tmpdir, 'chromedriver.log')
+        service_options = { args: ['--verbose', "--log-path=#{log_path}"] }
+        service_options[:path] = driver_path unless driver_path.to_s.empty?
+        service = Selenium::WebDriver::Service.chrome(**service_options)
+        driver = Selenium::WebDriver.for(:chrome, options: options, service: service)
+
         driver.navigate.to(LOGIN_PAGE_URL)
-        puts "請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續..."
+        puts '請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續...'
         STDIN.gets
 
         @current_cookie ||= {}
@@ -246,7 +286,7 @@ module BooksDL
 
         File.write(COOKIE_FILE_NAME, JSON.pretty_generate(@current_cookie))
         true
-      rescue => e
+      rescue StandardError => e
         puts "[Selenium] 登入失敗：#{e.class} - #{e.message}"
         false
       ensure

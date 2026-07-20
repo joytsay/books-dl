@@ -2,15 +2,58 @@
 
 ## 使用說明
 請先至網站購買電子書，並詳見 main.rb 的使用方法。
+目前已經在Arch Linux測試成功(2026.07.20)
+可能之後會有API更動會再次壞掉
+目前下載 API 使用 V1.7 `BookDownLoadURLII`。程式支援登入方式：
 
-新版v1.7需要安裝[chromedriver](https://developer.chrome.com/docs/chromedriver/downloads)
-並確保它與你的 Chrome 瀏覽器版本相符，放到 PATH 裡，才能使用selenium自動登入(現在是滑軌captcha)
-安裝確認
+1. 在專案目錄建立 `cookie.json`，填入已登入閱讀器的 Cookie（建議方式）：
+* 執行：
+```sh
+chromium 'https://viewer-ebook.books.com.tw/viewer/index.html?readlist=all'
 ```
-chromedriver -v
+
+
+* 尋找：
+
+中文說明：
+Cookie 可從 `viewer-ebook.books.com.tw` 的瀏覽器開發者工具取得，通常約 30 分鐘後需重新取得。`device_id` 不是 Cookie，請從同一網域的 Application → Local Storage 複製。
+免費或試讀書若回傳 `encrypt_type: "none"`，瀏覽器可能不會建立 `DownloadToken`；此時只需提供其餘三個 Cookie。
+
+英文說明：
+```sh
+  1. In Chromium DevTools, open Application → Storage.
+  2. Click Clear site data for viewer-ebook.books.com.tw.
+  3. Reload the viewer, log in, and wait for the bookshelf to load.
+  4. From that same profile, copy:
+      - Cookies: CmsToken, DownloadToken if present, bid, ssid
+      - Local Storage: device_id
+  5. Replace all values in cookie.json:
 ```
-output:
-`ChromeDriver 135.0.7049.114 ...`
+
+* 設定cookie.json 上面的2個token, 及4個id
+已購買書籍的 `book_id`（不要包含網址中的 `&ran=...`）:
+
+```
+```json
+{
+  "CmsToken": "",
+  "DownloadToken": "",
+  "bid": "",
+  "ssid": "",
+  "device_id": "",
+  "book_id": ""
+}
+```
+
+
+然後執行：
+```sh
+bundle install
+bundle exec ruby main.rb
+```
+
+看不懂可以看影片：
+https://github.com/user-attachments/assets/aa35c56b-d885-421c-bf23-fabe887164f0
 
 > 下載時請不要用瀏覽器操作博客來網站功能，該站電子書區有防多重登入。
 

@@ -7,22 +7,12 @@ module BooksDL
     end
 
     def self.generate_key(url, download_token)
-      raise ArgumentError, "url is nil" if url.nil?
-      raise ArgumentError, "download_token is nil for url=#{url.inspect}" if download_token.nil? || download_token.empty?
+      raise ArgumentError, 'url is nil' if url.nil?
+      if download_token.nil? || download_token.empty?
+        raise ArgumentError, "download_token is nil or empty for url=#{url.inspect}"
+      end
 
-      puts url
-
-      file_path =
-        if url.start_with?("http://", "https://")
-          match = url.match(%r{\Ahttps?://(.*?/){3}.*?(?<rest_part>/.+)\z})
-          raise ArgumentError, "unexpected download url format: #{url}" unless match && match[:rest_part]
-
-          CGI.unescape(match[:rest_part])
-        else
-          CGI.unescape(url.start_with?("/") ? url : "/#{url}")
-        end
-
-      puts "[DEBUG] file_path for key = #{file_path}"
+      file_path = extract_file_path(url)
 
       md5_chars = Digest::MD5.hexdigest(file_path).chars
       partition = md5_chars.each_slice(4).reduce(0) do |num, chars|
@@ -34,6 +24,36 @@ module BooksDL
       )
 
       hex_to_byte(decode_hex)
+    end
+
+    # The encryption path starts after /V1.0/Streaming/book[II]. Query
+    # parameters must not be included because they change the SHA256 key.
+    def self.extract_file_path(url)
+      value = url.to_s.split('?', 2).first
+      return URI::DEFAULT_PARSER.unescape(value.start_with?('/') ? value : "/#{value}") unless value.match?(%r{\Ahttps?://}i)
+
+      path = URI.parse(value).path
+      parts = path.split('/').reject(&:empty?)
+      streaming_index = parts.index('Streaming')
+      unless streaming_index && parts.length > streaming_index + 2
+        raise ArgumentError, "unexpected download url format: #{url}"
+      end
+
+      URI::DEFAULT_PARSER.unescape("/#{parts.drop(streaming_index + 2).join('/')}")
+    rescue URI::InvalidURIError
+      raise ArgumentError, "unexpected download url format: #{url}"
+    end
+
+    # Resource requests use the viewer's YA() signature. Metadata files use
+    # the raw download token and fonts do not use a token at all.
+    def self.ya_token(download_token, path)
+      raise ArgumentError, 'download_token is nil or empty' if download_token.nil? || download_token.empty?
+
+      resource_path = path.to_s.sub(%r{\A/+}, '')
+      key = (67 * Math.sqrt(resource_path.length)).round.to_s + resource_path
+      message = "#{download_token}|#{resource_path}|web"
+
+      OpenSSL::HMAC.hexdigest('SHA256', key, message) + download_token
     end
 
     def self.decode_xor(key, encrypted_content)
